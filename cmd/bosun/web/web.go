@@ -27,16 +27,20 @@ import (
 	"bosun.org/slog"
 	"bosun.org/util"
 	"bosun.org/version"
+
 	"github.com/MiniProfiler/go/miniprofiler"
 	"github.com/gorilla/mux"
+	"github.com/kylebrandt/annotate/backend"
+	"github.com/kylebrandt/annotate/web"
+
 )
 
 var (
-	indexTemplate func() *template.Template
-	router        = mux.NewRouter()
-	schedule      = sched.DefaultSched
-
-	InternetProxy *url.URL
+	indexTemplate   func() *template.Template
+	router          = mux.NewRouter()
+	schedule        = sched.DefaultSched
+	InternetProxy   *url.URL
+	annotateBackend backend.Backend
 )
 
 const (
@@ -51,6 +55,7 @@ func init() {
 	miniprofiler.Enable = func(r *http.Request) bool {
 		return r.Header.Get(miniprofilerHeader) != ""
 	}
+
 	metadata.AddMetricMeta("bosun.search.puts_relayed", metadata.Counter, metadata.Request,
 		"The count of api put requests sent to Bosun for relaying to the backend server.")
 	metadata.AddMetricMeta("bosun.search.datapoints_relayed", metadata.Counter, metadata.Item,
@@ -87,6 +92,14 @@ func Listen(listenAddr string, devMode bool, tsdbHost string) error {
 		router.HandleFunc("/api/index", IndexTSDB)
 		router.Handle("/api/put", Relay(tsdbHost))
 	}
+	var err error
+	annotateBackend, err = backend.NewElastic([]string{"http://ny-devlogstash04:9200"}, "annotate")
+	if err != nil {
+		return err
+	}
+	if err := annotateBackend.InitBackend(); err != nil {
+		return err
+	}
 	router.HandleFunc("/api/", APIRedirect)
 	router.Handle("/api/action", JSON(Action))
 	router.Handle("/api/alerts", JSON(Alerts))
@@ -119,6 +132,7 @@ func Listen(listenAddr string, devMode bool, tsdbHost string) error {
 	router.Handle("/api/tagv/{tagk}/{metric}", JSON(TagValuesByMetricTagKey))
 	router.Handle("/api/tagsets/{metric}", JSON(FilteredTagsetsByMetric))
 	router.Handle("/api/opentsdb/version", JSON(OpenTSDBVersion))
+	web.AddRoutes(router, "/api", []backend.Backend{annotateBackend}, false, false)
 	router.HandleFunc("/api/version", Version)
 	router.Handle("/api/debug/schedlock", JSON(ScheduleLockStatus))
 	http.Handle("/", miniprofiler.NewHandler(Index))

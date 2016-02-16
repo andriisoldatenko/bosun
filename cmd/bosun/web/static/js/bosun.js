@@ -335,6 +335,12 @@ function getUser() {
 function setUser(name) {
     createCookie('action-user', name, 1000);
 }
+function getOwner() {
+    return readCookie('action-owner');
+}
+function setOwner(name) {
+    createCookie('action-owner', name, 1000);
+}
 // from: http://stackoverflow.com/a/15267754/864236
 bosunApp.filter('reverse', function () {
     return function (items) {
@@ -344,6 +350,33 @@ bosunApp.filter('reverse', function () {
         return items.slice().reverse();
     };
 });
+var timeFormat = 'YYYY-MM-DDTHH:mm:ssZ';
+var Annotation = (function () {
+    function Annotation(a) {
+        a = a || {};
+        this.Id = a.Id || "";
+        this.Message = a.Message || "";
+        this.StartDate = a.StartDate || "";
+        this.EndDate = a.EndDate || "";
+        this.CreationUser = a.CreationUser || getUser() || "";
+        this.Url = a.Url || "";
+        this.Source = a.Source || "bosun-ui";
+        this.Host = a.Host || "";
+        this.Owner = a.Owner || getOwner() || "";
+        this.Category = a.Category || "";
+    }
+    Annotation.prototype.setTimeUTC = function () {
+        var now = moment().utc().format(timeFormat);
+        this.StartDate = now;
+        this.EndDate = now;
+    };
+    Annotation.prototype.setTime = function () {
+        var now = moment().format(timeFormat);
+        this.StartDate = now;
+        this.EndDate = now;
+    };
+    return Annotation;
+})();
 bosunControllers.controller('ActionCtrl', ['$scope', '$http', '$location', '$route', function ($scope, $http, $location, $route) {
         var search = $location.search();
         $scope.user = readCookie("action-user");
@@ -1236,6 +1269,7 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
         return {
             scope: {
                 data: '=',
+                annotations: '=',
                 height: '=',
                 generator: '=',
                 brushStart: '=bstart',
@@ -1243,9 +1277,21 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
                 enableBrush: '@',
                 max: '=',
                 min: '=',
-                normalize: '='
+                normalize: '=',
+                annotation: '='
             },
-            link: function (scope, elem, attrs) {
+            template: '<div class="row"></div>' +
+                '<div class="row col-lg-12"></div>' +
+                '<div class"row">' +
+                '<div class="col-lg-6"></div>' +
+                '<div class="col-lg-6"></div>' +
+                '</div>',
+            link: function (scope, elem, attrs, $compile) {
+                var chartElem = d3.select(elem.children()[0]);
+                var timeElem = d3.select(elem.children()[1]);
+                var legendAnnContainer = angular.element(elem.children()[2]);
+                var legendElem = d3.select(legendAnnContainer.children()[0]);
+                var annElem = d3.select(legendAnnContainer.children()[1]); //
                 var valueIdx = 1;
                 if (scope.normalize) {
                     valueIdx = 2;
@@ -1273,8 +1319,9 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
                 }
                 var brush = d3.svg.brush()
                     .x(xScale)
-                    .on('brush', brushed);
-                var top = d3.select(elem[0])
+                    .on('brush', brushed)
+                    .on('brushend', annotateBrushed);
+                var top = chartElem
                     .append('svg')
                     .attr('height', svgHeight)
                     .attr('width', '100%');
@@ -1297,6 +1344,7 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
                 var paths = chart.append('g');
                 chart.append('g')
                     .attr('class', 'x brush');
+                var ann = chart.append('g');
                 top.append('rect')
                     .style('opacity', 0)
                     .attr('x', 0)
@@ -1305,14 +1353,22 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
                     .attr('width', margin.left)
                     .style('cursor', 'pointer')
                     .on('click', yaxisToggle);
-                var legendTop = d3.select(elem[0]).append('div');
-                var xloc = legendTop.append('div');
+                var xloc = timeElem.append('div').attr("class", "col-lg-6");
                 xloc.style('float', 'left');
-                var brushText = legendTop.append('div');
-                brushText.style('float', 'right');
-                var legend = d3.select(elem[0]).append('div');
-                legend.style('clear', 'both');
+                var brushText = timeElem.append('div').attr("class", "col-lg-6").append('p').attr("class", "text-right");
+                var legend = legendElem;
+                var aLegend = annElem;
                 var color = d3.scale.ordinal().range([
+                    '#e41a1c',
+                    '#377eb8',
+                    '#4daf4a',
+                    '#984ea3',
+                    '#ff7f00',
+                    '#a65628',
+                    '#f781bf',
+                    '#999999',
+                ]);
+                var annColor = d3.scale.ordinal().range([
                     '#e41a1c',
                     '#377eb8',
                     '#4daf4a',
@@ -1344,6 +1400,35 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
                     yaxisZero = !yaxisZero;
                     draw();
                 }
+                var drawAnnLegend = function () {
+                    if (scope.annotation) {
+                        aLegend.html('');
+                        var a = scope.annotation;
+                        //var table = aLegend.append('table').attr("class", "table table-condensed")
+                        var table = aLegend.append("div");
+                        var row = table.append("div").attr("class", "row");
+                        row.append("div").attr("class", "col-lg-2").text("CreationUser");
+                        row.append("div").attr("class", "col-lg-10").text(a.CreationUser);
+                        row = table.append("div").attr("class", "row");
+                        row.append("div").attr("class", "col-lg-2").text("Owner");
+                        row.append("div").attr("class", "col-lg-10").text(a.Owner);
+                        row = table.append("div").attr("class", "row");
+                        row.append("div").attr("class", "col-lg-2").text("Url");
+                        row.append("div").attr("class", "col-lg-10").append('a')
+                            .attr("xlink:href", a.Url).text(a.Url).on("click", function (d) {
+                            window.open(a.Url, "_blank");
+                        });
+                        row = table.append("div").attr("class", "row");
+                        row.append("div").attr("class", "col-lg-2").text("Category");
+                        row.append("div").attr("class", "col-lg-10").text(a.Category);
+                        row = table.append("div").attr("class", "row");
+                        row.append("div").attr("class", "col-lg-2").text("Host");
+                        row.append("div").attr("class", "col-lg-10").text(a.Host);
+                        row = table.append("div").attr("class", "row");
+                        row.append("div").attr("class", "col-lg-2").text("Message");
+                        row.append("div").attr("class", "col-lg-10").text(a.Message);
+                    } //
+                };
                 var drawLegend = _.throttle(function (normalizeIdx) {
                     var names = legend.selectAll('.series')
                         .data(scope.data, function (d) { return d.Name; });
@@ -1420,7 +1505,7 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
                         brushText.text(s);
                     }
                 }, 50);
-                scope.$watch('data', update);
+                scope.$watchCollection('[data, annotations]', update);
                 var w = angular.element($window);
                 scope.$watch(function () {
                     return w.width();
@@ -1446,10 +1531,13 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
                 }
                 var oldx = 0;
                 var bisect = d3.bisector(function (d) { return d[0]; }).left;
+                var bisectA = d3.bisector(function (d) { return moment(d.StartDate).unix(); }).left;
                 function update(v) {
                     if (!angular.isArray(v) || v.length == 0) {
                         return;
                     }
+                    //brush.clear();
+                    d3.selectAll(".x.brush").call(brush.clear());
                     resize();
                 }
                 function draw() {
@@ -1521,6 +1609,39 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
                         .attr("x", -(height / 2))
                         .attr("dy", "1em")
                         .text(_.uniq(scope.data.map(function (v) { return v.Unit; })).join("; "));
+                    var annotations = ann.selectAll('.annotation')
+                        .data(scope.annotations, function (d) { return d.Id; });
+                    annotations.enter()
+                        .append("svg:a")
+                        .append('rect')
+                        .attr("y", function (d, i) { return i * ((height * .05) + 2); })
+                        .attr("height", height * .05)
+                        .attr("class", "annotation")
+                        .attr("stroke", function (d) { return annColor(d.Id); })
+                        .attr("stroke-opacity", .5)
+                        .attr("fill", function (d) { return annColor(d.Id); })
+                        .attr("fill-opacity", 0.1)
+                        .attr("stroke-width", 1)
+                        .attr("x", function (d) { return xScale(moment(d.StartDate).utc().unix() * 1000); })
+                        .attr("width", function (d) {
+                        var startT = moment(d.StartDate).utc().unix() * 1000;
+                        var endT = moment(d.EndDate).utc().unix() * 1000;
+                        if (startT == endT) {
+                            return 3;
+                        }
+                        return xScale(endT) - xScale(startT);
+                    })
+                        .on("mouseenter", function (ann) {
+                        if (ann) {
+                            scope.annotation = ann;
+                            drawAnnLegend();
+                        }
+                        scope.$apply();
+                    })
+                        .on("click", function () {
+                        angular.element('#modalShower').trigger('click');
+                    });
+                    annotations.exit().remove();
                     var queries = paths.selectAll('.line')
                         .data(scope.data, function (d) { return d.Name; });
                     switch (scope.generator) {
@@ -1568,6 +1689,11 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
                 var extentEnd;
                 var extentDiff;
                 function brushed() {
+                    var e;
+                    e = event;
+                    if (e.metaKey) {
+                        return;
+                    }
                     var extent = brush.extent();
                     extentStart = datefmt(extent[0]);
                     extentEnd = datefmt(extent[1]);
@@ -1578,6 +1704,19 @@ bosunApp.directive('tsGraph', ['$window', 'nfmtFilter', function ($window, fmtfi
                         scope.brushEnd = extentEnd;
                         scope.$apply();
                     }
+                }
+                function annotateBrushed() {
+                    var e;
+                    e = event;
+                    if (!e.metaKey) {
+                        return;
+                    }
+                    var extent = brush.extent();
+                    scope.annotation = new Annotation();
+                    scope.annotation.StartDate = moment(extent[0]).utc().format(timeFormat);
+                    scope.annotation.EndDate = moment(extent[1]).utc().format(timeFormat);
+                    scope.$apply(); // This logs a console type error, but also works .. odd.
+                    angular.element('#modalShower').trigger('click');
                 }
                 var mfmt = 'YYYY/MM/DD-HH:mm:ss';
                 function datefmt(d) {
@@ -1918,6 +2057,7 @@ bosunControllers.controller('GraphCtrl', ['$scope', '$http', '$location', '$rout
         if (search.b64) {
             j = atob(search.b64);
         }
+        $scope.annotation = {};
         var request = j ? JSON.parse(j) : new Request;
         $scope.index = parseInt($location.hash()) || 0;
         $scope.tagvs = [];
@@ -1965,6 +2105,28 @@ bosunControllers.controller('GraphCtrl', ['$scope', '$http', '$location', '$rout
             }
             return AbsToRel(s);
         }
+        $scope.submitAnnotation = function () { return $http.post('/api/annotation', $scope.annotation)
+            .success(function (data) {
+            //debugger;
+            if ($scope.annotation.Id == "" && $scope.annotation.Owner != "") {
+                setOwner($scope.annotation.Owner);
+            }
+            $scope.annotation = new Annotation(data);
+            $scope.error = "";
+            // This seems to make angular refresh, where a push doesn't
+            $scope.annotations = $scope.annotations.concat($scope.annotation);
+        })
+            .error(function (error) {
+            $scope.error = error;
+        }); };
+        $scope.deleteAnnotation = function () { return $http.delete('/api/annotation/' + $scope.annotation.Id)
+            .success(function (data) {
+            $scope.error = "";
+            $scope.annotations = _.without($scope.annotations, _.findWhere($scope.annotations, { Id: $scope.annotation.Id }));
+        })
+            .error(function (error) {
+            $scope.error = error;
+        }); };
         $scope.SwitchTimes = function () {
             $scope.start = SwapTime($scope.start);
             $scope.end = SwapTime($scope.end);
@@ -1976,6 +2138,18 @@ bosunControllers.controller('GraphCtrl', ['$scope', '$http', '$location', '$rout
         $scope.setIndex = function (i) {
             $scope.index = i;
         };
+        $http.get('/api/annotation/values/Owner')
+            .success(function (data) {
+            $scope.owners = data;
+        });
+        $http.get('/api/annotation/values/Category')
+            .success(function (data) {
+            $scope.categories = data;
+        });
+        $http.get('/api/annotation/values/Host')
+            .success(function (data) {
+            $scope.hosts = data;
+        });
         $scope.GetTagKByMetric = function (index) {
             $scope.tagvs[index] = new TagV;
             var metric = $scope.query_p[index].metric;
@@ -2182,6 +2356,7 @@ bosunControllers.controller('GraphCtrl', ['$scope', '$http', '$location', '$rout
             $http.get('/api/graph?' + 'b64=' + encodeURIComponent(btoa(JSON.stringify(request))) + autods + autorate + min + max)
                 .success(function (data) {
                 $scope.result = data.Series;
+                $scope.annotations = data.Annotations;
                 if (!$scope.result) {
                     $scope.warning = 'No Results';
                 }
