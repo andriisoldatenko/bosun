@@ -319,15 +319,15 @@ bosunControllers.controller('GraphCtrl', ['$scope', '$http', '$location', '$rout
 		$scope.index = i;
 	};
 	$http.get('/api/annotation/values/Owner')
-		.success((data) => {
+		.success((data: string[]) => {
 			$scope.owners = data;
 		});
 	$http.get('/api/annotation/values/Category')
-		.success((data) => {
+		.success((data: string[]) => {
 			$scope.categories = data;
 		});
 	$http.get('/api/annotation/values/Host')
-		.success((data) => {
+		.success((data: string[]) => {
 			$scope.hosts = data;
 		});
 	$scope.GetTagKByMetric = function(index: number) {
